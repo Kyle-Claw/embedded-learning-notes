@@ -19,18 +19,18 @@
 
 | 主题 | 文件 | 讲什么 | 形式 |
 |---|---|---|---|
-| **GPIO 点灯** | [gpio/gpio-led-infographic.png](gpio/gpio-led-infographic.png) | 从供电、时钟、寄存器到推挽输出、限流电阻、LED 的完整链路 | 信息图 |
-| | [gpio/gpio-led-comic.png](gpio/gpio-led-comic.png) | 同一件事的漫画版（为什么"写个 1 灯就亮") | 漫画 |
-| **MCU 架构** | [mcu/mcu-classic-architecture.png](mcu/mcu-classic-architecture.png) | 经典 MCU 架构：内核 / 总线 / 外设 / 存储器怎么连 | 架构图 |
-| | [mcu/mcu-classic-architecture.html](mcu/mcu-classic-architecture.html) | 同上，可交互版本（浏览器直接打开） | 交互页 |
-| | [mcu/mcu-c-cpu-interactive.html](mcu/mcu-c-cpu-interactive.html) | C 语言、CPU、MCU 三者关系 | 交互页 |
-| | [mcu/mcu-c-cpu-relations.mp4](mcu/mcu-c-cpu-relations.mp4) | 同上，动画短片 | 视频 |
-| **存储器** | [memory/memory-three-compared.png](memory/memory-three-compared.png) | Flash / SRAM / 寄存器 三大件对比 | 对比图 |
-| **CPU 执行** | [cpu/cpu-fetch-decode-execute.html](cpu/cpu-fetch-decode-execute.html) | 取指 → 译码 → 执行 一个指令周期动画 | 动画 |
-| **FOC 控制** | [foc/foc-coordinate-transform.html](foc/foc-coordinate-transform.html) | Clarke / Park 坐标变换（电机矢量控制） | 动画 |
-| | [foc/foc-control-block.png](foc/foc-control-block.png) | FOC 控制框图 | 框图 |
+| **GPIO 点灯** | [gpio-led-infographic.png](gpio-led-infographic.png) | 从供电、时钟、寄存器到推挽输出、限流电阻、LED 的完整链路 | 信息图 |
+| | [gpio-led-comic.png](gpio-led-comic.png) | 同一件事的漫画版（为什么"写个 1 灯就亮"） | 漫画 |
+| **MCU 架构** | [mcu-classic-architecture.png](mcu-classic-architecture.png) | 经典 MCU 架构：内核 / 总线 / 外设 / 存储器怎么连 | 架构图 |
+| | [mcu-classic-architecture.html](mcu-classic-architecture.html) | 同上，可交互版本（浏览器直接打开） | 交互页 |
+| | [mcu-c-cpu-interactive.html](mcu-c-cpu-interactive.html) | C 语言、CPU、MCU 三者关系 | 交互页 |
+| | [mcu-c-cpu-relations.mp4](mcu-c-cpu-relations.mp4) | 同上，动画短片 | 视频 |
+| **存储器** | [memory-three-compared.png](memory-three-compared.png) | Flash / SRAM / 寄存器 三大件对比 | 对比图 |
+| **CPU 执行** | [cpu-fetch-decode-execute.html](cpu-fetch-decode-execute.html) | 取指 → 译码 → 执行 一个指令周期动画 | 动画 |
+| **FOC 控制** | [foc-coordinate-transform.html](foc-coordinate-transform.html) | Clarke / Park 坐标变换（电机矢量控制） | 动画 |
+| | [foc-control-block.png](foc-control-block.png) | FOC 控制框图 | 框图 |
 
-`.html` 文件是零依赖的（原生 Canvas/SVG），**双击即在浏览器里跑**，不用装任何东西。
+`.html` 文件是零依赖的（原生 Canvas/SVG），**下载后双击即在浏览器里跑**，不用装任何东西。
 
 ## 怎么用
 
