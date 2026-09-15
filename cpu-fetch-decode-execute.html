@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CPU 核心循环：取指 → 译码 → 执行（串行 vs 流水线并行）</title>
+<style>
+  body { margin:0; background:#141414; color:#e8e8e8; font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif; display:flex; flex-direction:column; align-items:center; padding:22px 14px; }
+  h1 { font-size:22px; font-weight:700; margin:0 0 6px; color:#fff; letter-spacing:1px; }
+  .sub { font-size:14px; color:#aaa; margin-bottom:16px; text-align:center; max-width:960px; line-height:1.6; }
+  canvas { background:#1b1b1b; border-radius:12px; box-shadow:0 6px 28px rgba(0,0,0,.55); }
+  .legend { display:flex; gap:22px; margin-top:14px; font-size:13px; flex-wrap:wrap; justify-content:center; color:#d0d0d0; }
+  .legend span { display:flex; align-items:center; gap:7px; }
+  .dot { width:12px; height:12px; border-radius:3px; display:inline-block; }
+</style>
+</head>
+<body>
+<h1>CPU 核心循环：取指 → 译码 → 执行（串行 vs 流水线并行）</h1>
+<div class="sub">一个由<b>时钟</b>驱动的<b>状态机</b>。动画会自动轮换两种视角：<b>模式 A</b> 单条指令串行（非流水线）→ <b>模式 B</b> 三条指令并行（流水线）。数据走到哪一环，那一环就亮起来。</div>
+<canvas id="c" width="1010" height="600"></canvas>
+<div class="legend">
+  <span><span class="dot" style="background:#ff9800"></span>取指（地址/PC）</span>
+  <span><span class="dot" style="background:#83c167"></span>指令（Flash 读出的 0/1）</span>
+  <span><span class="dot" style="background:#c792ea"></span>译码（控制信号）</span>
+  <span><span class="dot" style="background:#58c4dd"></span>执行（数据/ALU）</span>
+</div>
+<script>
+(function(){
+  var c = document.getElementById('c');
+  var ctx = c.getContext('2d');
+  var W = c.width, H = c.height;
+  var last = performance.now();
+
+  var by = 96, bh = 92, cyBox = by + bh/2;
+  var boxes = [
+    {x:30,  w:128, name:'PC',    sub:'程序计数器·车头',     color:'#ff9800'},
+    {x:208, w:158, name:'Flash', sub:'指令存储器',           color:'#83c167'},
+    {x:428, w:132, name:'IR',    sub:'指令寄存器·32触发器',  color:'#58c4dd'},
+    {x:622, w:142, name:'译码器', sub:'位模式→控制线',        color:'#c792ea'},
+    {x:824, w:158, name:'ALU+寄存器堆', sub:'计算·存取·写回', color:'#ffb454'}
+  ];
+
+  // ===== 串行模式状态 =====
+  var phase=0, phaseT=0, PHASE=1.9, cycle=0;
+  var pcAddr=0x08000004, INSTR="ADD R0, R0, R1";
+  // ===== 流水线模式状态 =====
+  var pipeT=0, PIPEBEAT=1.35;
+  // ===== 模式切换 =====
+  var MODE=0, modeT=0, MODE_DUR=9;
+
+  function roundRect(x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+  }
+  function boxCenter(i){ return { x: boxes[i].x + boxes[i].w/2, y: cyBox }; }
+  function hex4(n){ return "0x" + ("00000000" + n.toString(16).toUpperCase()).slice(-8); }
+
+  function drawBox(i, active, content){
+    var b = boxes[i], cx = b.x + b.w/2;
+    ctx.fillStyle = active ? '#2b2b2b' : '#1f1f1f';
+    ctx.strokeStyle = active ? b.color : '#454545';
+    ctx.lineWidth = active ? 3 : 1.5;
+    roundRect(b.x, by, b.w, bh, 9); ctx.fill(); ctx.stroke();
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillStyle = active ? b.color : '#eee';
+    ctx.font = 'bold 15px "Microsoft YaHei",sans-serif';
+    ctx.fillText(b.name, cx, by+24);
+    ctx.fillStyle = '#999'; ctx.font = '10.5px "Microsoft YaHei",sans-serif';
+    ctx.fillText(b.sub, cx, by+42);
+    ctx.fillStyle = '#e8e8e8'; ctx.font = '12px "Consolas","Microsoft YaHei",sans-serif';
+    if (content) ctx.fillText(content, cx, by+68);
+    else ctx.fillText('—', cx, by+68);
+  }
+
+  function arrowBetween(i, j, color, label, prog){
+    var a = boxCenter(i), b = boxCenter(j);
+    var x1 = a.x, x2 = b.x, y = cyBox;
+    ctx.strokeStyle = color; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x1+6, y); ctx.lineTo(x2-8, y); ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.moveTo(x2-4, y); ctx.lineTo(x2-14, y-5); ctx.lineTo(x2-14, y+5); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = color; ctx.font = '11px "Microsoft YaHei",sans-serif';
+    ctx.textAlign='center'; ctx.fillText(label, (x1+x2)/2, y-11);
+    if (prog >= 0 && prog <= 1){
+      var px = x1 + 8 + (x2 - x1 - 16) * prog;
+      var glow = ctx.createRadialGradient(px,y,1,px,y,9);
+      glow.addColorStop(0, '#fff'); glow.addColorStop(0.3, color); glow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(px, y, 9, 0, 2*Math.PI); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(px, y, 3.5, 0, 2*Math.PI); ctx.fill();
+    }
+  }
+
+  function drawStaticArrows(){
+    arrowBetween(0,1,'#ff9800','地址总线', -1);
+    arrowBetween(1,2,'#83c167','数据总线', -1);
+    arrowBetween(2,3,'#83c167','指令', -1);
+    arrowBetween(3,4,'#c792ea','控制信号', -1);
+  }
+
+  function drawClock(){
+    var x = W-64, y = 30, r = 16;
+    var beat = (phaseT < 0.15 || (MODE===1 && (pipeT%PIPEBEAT) < 0.15)) ? 1 : 0;
+    ctx.fillStyle = beat ? '#fff' : '#2a2a2a';
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 2*Math.PI); ctx.stroke(); ctx.fill();
+    ctx.fillStyle = beat ? '#141414' : '#fff';
+    ctx.font = 'bold 14px "Microsoft YaHei",sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('拍', x, y);
+    ctx.fillStyle = '#aaa'; ctx.font = '10px "Microsoft YaHei",sans-serif';
+    ctx.fillText('时钟打拍', x, y+30);
+  }
+
+  function drawInstrBar(){
+    var bx = 120, bw = 770, y = 268;
+    ctx.fillStyle = '#999'; ctx.font = '13px "Microsoft YaHei",sans-serif'; ctx.textAlign='center';
+    ctx.fillText('当前指令：' + INSTR + '　（32 位，示意分段）', W/2, y-16);
+    var segs = [
+      {w:0.40, color:'#83c167', label:'opcode 操作码', sub:'做什么 = 加法 ADD'},
+      {w:0.20, color:'#58c4dd', label:'Rd', sub:'目标 R0'},
+      {w:0.20, color:'#58c4dd', label:'Rn', sub:'源 R0'},
+      {w:0.20, color:'#58c4dd', label:'Rm', sub:'源 R1'}
+    ];
+    var x = bx;
+    for (var i=0;i<segs.length;i++){
+      var s = segs[i], w = bw*s.w;
+      ctx.fillStyle = s.color;
+      roundRect(x, y, w-3, 34, 4); ctx.fill();
+      ctx.fillStyle = '#141414'; ctx.font = 'bold 12px "Microsoft YaHei",sans-serif';
+      ctx.fillText(s.label, x+(w-3)/2, y+13);
+      ctx.fillStyle = '#bbb'; ctx.font = '10.5px "Microsoft YaHei",sans-serif';
+      ctx.fillText(s.sub, x+(w-3)/2, y+44);
+      x += w;
+    }
+    ctx.fillStyle = '#888'; ctx.font = '11px "Microsoft YaHei",sans-serif'; ctx.textAlign='center';
+    ctx.fillText('前半段 opcode 告诉 CPU「做什么」，后半段 operand 告诉它「对谁做」', W/2, y+72);
+  }
+
+  function wrapText(text, x, y, maxW, lh){
+    var chars = text.split(''); var line = '', lines = [];
+    for (var i=0;i<chars.length;i++){
+      var t = line + chars[i];
+      if (ctx.measureText(t).width > maxW && line.length>0){ lines.push(line); line = chars[i]; }
+      else line = t;
+    }
+    if (line) lines.push(line);
+    for (var j=0;j<lines.length;j++) ctx.fillText(lines[j], x, y + j*lh);
+  }
+
+  function drawFlashGrid(active){
+    var b = boxes[1];
+    var gx = b.x + 18, gy = by + 50, cw = 12, ch = 7, rows = 3, cols = 8;
+    for (var r=0;r<rows;r++){
+      for (var col=0;col<cols;col++){
+        var lit = (active && r===1);
+        ctx.fillStyle = lit ? '#83c167' : '#3a3a3a';
+        ctx.fillRect(gx+col*(cw+2), gy+r*(ch+2), cw, ch);
+      }
+    }
+    ctx.fillStyle = '#aaa'; ctx.font = '9px "Microsoft YaHei",sans-serif'; ctx.textAlign='left';
+    ctx.fillText(active ? '字线选中这一行' : '存储阵列', gx, gy+rows*(ch+2)+10);
+  }
+
+  // ===== 串行模式底部：三阶段环 =====
+  var phases = [
+    {name:'① 取指 Fetch',  color:'#ff9800', desc:'PC 把地址放上地址总线（32 根并行线，每根 1 bit）→ 地址译码器选中 Flash 那一行 → 浮栅读出（读出放大器）→ 数据总线 → IR 在时钟沿抓住；PC 同时 +1'},
+    {name:'② 译码 Decode', color:'#c792ea', desc:'译码器看 opcode（做什么）+ operand（对谁），点亮对应的控制线——就像读打孔卡，把 0/1 翻译成"该动哪部分"'},
+    {name:'③ 执行 Execute', color:'#58c4dd', desc:'控制信号指挥 ALU 做加法、寄存器堆取 R0/R1 → 数据总线 → 结果写回目标寄存器 → 时钟推进，进入下一条'}
+  ];
+  function drawPhaseLoop(){
+    var y = 402;
+    var cxs = [W/2-330, W/2, W/2+330];
+    for (var i=0;i<3;i++){
+      var active = (i===phase);
+      var x = cxs[i];
+      ctx.fillStyle = active ? phases[i].color : '#262626';
+      ctx.strokeStyle = active ? phases[i].color : '#555';
+      ctx.lineWidth = active ? 3 : 1.5;
+      ctx.beginPath(); ctx.arc(x, y, 26, 0, 2*Math.PI); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = active ? '#141414' : '#bbb';
+      ctx.font = 'bold 13px "Microsoft YaHei",sans-serif'; ctx.textAlign='center';
+      ctx.fillText(i+1, x, y);
+      ctx.fillStyle = active ? phases[i].color : '#aaa';
+      ctx.font = 'bold 13px "Microsoft YaHei",sans-serif';
+      ctx.fillText(phases[i].name, x, y+48);
+    }
+    ctx.strokeStyle = '#666'; ctx.lineWidth = 1.5;
+    for (var k=0;k<2;k++){
+      var ax = cxs[k]+34, bx2 = cxs[k+1]-34;
+      ctx.beginPath(); ctx.moveTo(ax, y); ctx.lineTo(bx2, y); ctx.stroke();
+      ctx.fillStyle = '#666';
+      ctx.beginPath(); ctx.moveTo(bx2-2, y); ctx.lineTo(bx2-10, y-4); ctx.lineTo(bx2-10, y+4); ctx.closePath(); ctx.fill();
+    }
+    ctx.fillStyle = '#ddd'; ctx.font = '12.5px "Microsoft YaHei",sans-serif'; ctx.textAlign='center';
+    wrapText(phases[phase].desc, W/2, 470, 900, 19);
+  }
+
+  // ===== 流水线模式：传送带 + 错开图 =====
+  var slotX = [494, 693, 903];  // 取指(IR) / 译码器 / ALU 的 x 中心
+  function stageScreenX(sf){
+    if (sf <= 0) return slotX[0];
+    if (sf < 1)  return slotX[0] + (slotX[1]-slotX[0])*sf;
+    if (sf < 2)  return slotX[1] + (slotX[2]-slotX[1])*(sf-1);
+    return slotX[2] + (sf-2)*95;
+  }
+  function drawToken(x, y, label, color){
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(x, y, 14, 0, 2*Math.PI); ctx.fill();
+    ctx.fillStyle = '#141414'; ctx.font = 'bold 10px "Microsoft YaHei",sans-serif';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(label, x, y+0.5);
+  }
+
+  function drawPipelineDiagram(){
+    var y0 = 386, rowH = 32, colW = 128, x0 = 190;
+    ctx.fillStyle = '#999'; ctx.font = '12.5px "Microsoft YaHei",sans-serif'; ctx.textAlign='left';
+    ctx.fillText('流水线视角：三条指令错开一个节拍（竖着看 = 同一时刻，三环节并行）', x0, y0-10);
+    var cols = 5, rows = 3;
+    var stageColors = ['#ff9800', '#c792ea', '#58c4dd'];
+    var stageNames = ['取指','译码','执行'];
+    for (var r=0;r<rows;r++){
+      ctx.fillStyle = '#aaa'; ctx.font='11px "Microsoft YaHei",sans-serif'; ctx.textAlign='right';
+      ctx.fillText('指令'+(r+1), x0-16, y0 + r*rowH + (rowH-6)/2);
+      for (var cc=0; cc<cols; cc++){
+        var stage = cc - r;
+        var x = x0 + cc*colW;
+        if (stage>=0 && stage<3){
+          ctx.fillStyle = stageColors[stage];
+          roundRect(x, y0+r*rowH, colW-8, rowH-6, 5); ctx.fill();
+          ctx.fillStyle = '#141414'; ctx.font='11px "Microsoft YaHei",sans-serif'; ctx.textAlign='center';
+          ctx.fillText(stageNames[stage], x+(colW-8)/2, y0+r*rowH+(rowH-6)/2);
+        } else {
+          ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+          roundRect(x, y0+r*rowH, colW-8, rowH-6, 5); ctx.stroke();
+        }
+      }
+    }
+    // 列标签（拍1..拍5）
+    ctx.fillStyle = '#777'; ctx.font='10px "Microsoft YaHei",sans-serif'; ctx.textAlign='center';
+    for (var cc=0; cc<cols; cc++) ctx.fillText('拍'+(cc+1), x0+cc*colW+(colW-8)/2, y0-10);
+    // 高亮"同一时刻"列（cc=2：指令1执行/指令2译码/指令3取指）
+    var hx = x0 + 2*colW;
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.setLineDash([4,3]);
+    ctx.beginPath(); ctx.moveTo(hx, y0-16); ctx.lineTo(hx, y0+rows*rowH); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#fff'; ctx.font='11px "Microsoft YaHei",sans-serif'; ctx.textAlign='center';
+    ctx.fillText('↖ 同一时刻：执行 / 译码 / 取指 三条并行', hx + 160, y0 + 8);
+  }
+
+  function drawModeBar(){
+    ctx.textAlign='left';
+    if (MODE===0){
+      ctx.fillStyle = '#ff9800'; ctx.font='bold 13px "Microsoft YaHei",sans-serif';
+      ctx.fillText('模式 A · 单条指令串行（非流水线）', 30, 30);
+      ctx.fillStyle = '#777'; ctx.font='11px "Microsoft YaHei",sans-serif';
+      ctx.fillText('一条指令走完 取指→译码→执行，才走下一条', 30, 48);
+    } else {
+      ctx.fillStyle = '#c792ea'; ctx.font='bold 13px "Microsoft YaHei",sans-serif';
+      ctx.fillText('模式 B · 流水线并行（三条指令同时在三环节）', 30, 30);
+      ctx.fillStyle = '#777'; ctx.font='11px "Microsoft YaHei",sans-serif';
+      ctx.fillText('同一时刻：取指 / 译码 / 执行 各一条，像传送带一起前推', 30, 48);
+    }
+    ctx.textAlign='right';
+    ctx.fillStyle = '#555'; ctx.font='10px "Microsoft YaHei",sans-serif';
+    ctx.fillText('几秒后自动切换模式', W-30, 44);
+  }
+
+  // ===== 串行模式绘制 =====
+  function drawSerial(dt){
+    phaseT += dt;
+    if (phaseT >= PHASE){ phaseT=0; phase=(phase+1)%3; if(phase===0){cycle++; pcAddr+=4;} }
+    var prog = Math.min(1, phaseT/PHASE);
+    drawStaticArrows();
+    var act=[false,false,false,false,false];
+    if(phase===0){act[0]=true; if(prog>0.5)act[1]=true;}
+    if(phase===1){act[2]=true;act[3]=true;}
+    if(phase===2){act[3]=true;act[4]=true;}
+    drawBox(0,act[0],hex4(pcAddr));
+    drawBox(1,act[1],null); drawFlashGrid(act[1]);
+    drawBox(2,act[2], (phase>=1||(phase===0&&prog>0.5)) ? INSTR : '…');
+    drawBox(3,act[3], phase>=1?'opcode=ADD':'—');
+    drawBox(4,act[4], phase===2?'R0+R1 → R0':'—');
+
+    if (phase===0){
+      if (prog <= 0.5) arrowBetween(0,1,'#ff9800','地址', prog*2);
+      else arrowBetween(1,2,'#83c167','指令', (prog-0.5)*2);
+    } else if (phase===1){
+      arrowBetween(2,3,'#83c167','指令', prog);
+      if (prog > 0.3){
+        var bc = boxCenter(3);
+        ctx.strokeStyle='#c792ea'; ctx.lineWidth=2;
+        for (var k=0;k<3;k++){
+          var ang = -Math.PI/2 + (k-1)*0.5;
+          ctx.beginPath(); ctx.moveTo(bc.x, bc.y+bh/2);
+          ctx.lineTo(bc.x+Math.cos(ang)*34, bc.y+bh/2+30+Math.sin(ang)*14); ctx.stroke();
+        }
+      }
+    } else {
+      arrowBetween(3,4,'#c792ea','控制', prog);
+      if (prog > 0.5){
+        var b4 = boxCenter(4);
+        ctx.strokeStyle = '#58c4dd'; ctx.lineWidth = 2;
+        ctx.setLineDash([5,4]);
+        ctx.beginPath(); ctx.moveTo(b4.x, cyBox + bh/2);
+        ctx.quadraticCurveTo(b4.x, cyBox + 70, b4.x-70, cyBox + 60); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#58c4dd'; ctx.font='11px "Microsoft YaHei",sans-serif'; ctx.textAlign='center';
+        ctx.fillText('结果写回 R0', b4.x-40, cyBox+82);
+      }
+    }
+    drawInstrBar();
+    drawPhaseLoop();
+    drawClock();
+  }
+
+  // ===== 流水线模式绘制 =====
+  function drawPipeline(dt){
+    pipeT += dt;
+    var pipeBeat = Math.floor(pipeT/PIPEBEAT);
+    var pb = (pipeT%PIPEBEAT)/PIPEBEAT;
+    drawStaticArrows();
+    // 三环节同时亮
+    drawBox(0,true,hex4(pcAddr + pipeBeat*4));
+    drawBox(1,true,null); drawFlashGrid(true);
+    drawBox(2,true,INSTR);
+    drawBox(3,true,'opcode=ADD');
+    drawBox(4,true,'R0+R1 → R0');
+    // 传送带：三条指令 token
+    var tokenY = 224;
+    var colors=['#ff9800','#c792ea','#58c4dd'];
+    ctx.fillStyle='#666'; ctx.font='10px "Microsoft YaHei",sans-serif'; ctx.textAlign='left';
+    ctx.fillText('传送带（三条指令同时推进）:', 30, tokenY);
+    for (var k=0;k<3;k++){
+      var i = pipeBeat-2+k;
+      if (i<0) continue;
+      var sf = pipeT/PIPEBEAT - i;
+      if (sf<0 || sf>3) continue;
+      drawToken(stageScreenX(sf), tokenY, '指令'+(i+1), colors[i%3]);
+    }
+    drawInstrBar();
+    drawPipelineDiagram();
+    drawClock();
+  }
+
+  function draw(now){
+    var dt=(now-last)/1000; last=now;
+    modeT+=dt;
+    if(modeT>=MODE_DUR){ modeT=0; MODE=1-MODE; phaseT=0; pipeT=0; }
+    ctx.clearRect(0,0,W,H);
+    if(MODE===0) drawSerial(dt); else drawPipeline(dt);
+    drawModeBar();
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

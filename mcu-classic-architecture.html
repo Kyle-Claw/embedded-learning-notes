@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCU 经典架构（Cortex-M）</title>
+<style>
+  body { margin:0; background:#020617; color:#e2e8f0; font-family:'JetBrains Mono',Consolas,'Courier New','Microsoft YaHei',monospace; padding:26px 30px; }
+  body { print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+  .header { display:flex; align-items:center; gap:12px; margin-bottom:4px; }
+  .dot { width:11px; height:11px; border-radius:50%; background:#22d3ee; animation:pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.35;} }
+  h1 { font-size:21px; font-weight:700; color:#f1f5f9; margin:0; letter-spacing:.3px; }
+  .sub { font-size:12px; color:#64748b; margin:2px 0 18px 23px; }
+  .card { background:#0f172a; border:1px solid #1e293b; border-radius:12px; padding:18px; }
+  .legend { display:flex; gap:18px; flex-wrap:wrap; margin-top:18px; font-size:11.5px; color:#94a3b8; }
+  .legend span { display:flex; align-items:center; gap:6px; }
+  .swatch { width:13px; height:13px; border-radius:3px; border:1px solid rgba(255,255,255,.2); }
+  .cards { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:20px; }
+  .card2 { background:#0f172a; border:1px solid #1e293b; border-radius:12px; padding:14px 16px; }
+  .card2 h3 { font-size:13px; color:#e2e8f0; margin:0 0 8px; display:flex; align-items:center; gap:8px; }
+  .card2 .d { width:8px; height:8px; border-radius:2px; }
+  .card2 li { font-size:11.5px; color:#94a3b8; line-height:1.7; }
+  .card2 ul { margin:0; padding-left:16px; }
+  .footer { font-size:10.5px; color:#334155; margin-top:18px; }
+</style>
+</head>
+<body>
+  <div class="header"><span class="dot"></span><h1>MCU 经典架构（Cortex-M）</h1></div>
+  <div class="sub">CPU 调度 + 存储器 + 外设 + 时钟 + 总线 + 中断 —— 集成在一个芯片里，串起「C 语言 → 功能」</div>
+
+  <div class="card">
+    <svg viewBox="0 0 1200 660" width="100%" style="display:block;background:#020617;">
+      <defs>
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+        </pattern>
+        <marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 Z" fill="#94a3b8"/>
+        </marker>
+      </defs>
+      <rect x="0" y="0" width="1200" height="660" fill="url(#grid)"/>
+
+      <!-- 箭头（画在盒子后面） -->
+      <!-- CPU ↔ 总线 -->
+      <line x1="135" y1="122" x2="135" y2="188" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#ah)"/>
+      <line x1="135" y1="240" x2="135" y2="190" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#ah)"/>
+      <!-- 总线 ↔ Flash/SRAM -->
+      <line x1="125" y1="240" x2="125" y2="298" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#ah)"/>
+      <line x1="315" y1="240" x2="315" y2="298" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#ah)"/>
+      <!-- 总线 ↔ 外设 -->
+      <line x1="700" y1="240" x2="700" y2="298" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#ah)"/>
+      <!-- CPU ↔ 时钟 / 中断 -->
+      <line x1="355" y1="120" x2="355" y2="120" stroke="none"/>
+
+      <!-- ============ 核心/系统控制 ============ -->
+      <!-- CPU -->
+      <rect x="40"  y="50" width="190" height="72" rx="6" fill="#0f172a"/>
+      <rect x="40"  y="50" width="190" height="72" rx="6" fill="rgba(6,78,59,.42)" stroke="#34d399" stroke-width="1.5"/>
+      <text x="135" y="80" fill="#e2e8f0" font-size="12" text-anchor="middle" font-weight="700">CPU 核 · Cortex-M</text>
+      <text x="135" y="96" fill="#6ee7b7" font-size="9" text-anchor="middle">取指 / 译码 / 执行（调度）</text>
+      <text x="135" y="110" fill="#94a3b8" font-size="7" text-anchor="middle">C 语言意图 → 指令 → 动作</text>
+      <!-- 时钟 -->
+      <rect x="260" y="50" width="170" height="72" rx="6" fill="#0f172a"/>
+      <rect x="260" y="50" width="170" height="72" rx="6" fill="rgba(120,53,15,.3)" stroke="#fbbf24" stroke-width="1.5"/>
+      <text x="345" y="80" fill="#e2e8f0" font-size="12" text-anchor="middle" font-weight="700">时钟 RCC</text>
+      <text x="345" y="96" fill="#fcd34d" font-size="9" text-anchor="middle">HSE / PLL / SYSCLK</text>
+      <text x="345" y="110" fill="#94a3b8" font-size="7" text-anchor="middle">给 CPU/总线/外设打节拍</text>
+      <!-- 中断 -->
+      <rect x="470" y="50" width="160" height="72" rx="6" fill="#0f172a"/>
+      <rect x="470" y="50" width="160" height="72" rx="6" fill="rgba(136,19,55,.42)" stroke="#fb7185" stroke-width="1.5"/>
+      <text x="550" y="80" fill="#e2e8f0" font-size="12" text-anchor="middle" font-weight="700">中断 NVIC</text>
+      <text x="550" y="96" fill="#fda4af" font-size="9" text-anchor="middle">优先级 · 响应事件</text>
+      <text x="550" y="110" fill="#94a3b8" font-size="7" text-anchor="middle">打断 CPU 去处理急事</text>
+      <!-- 调试 -->
+      <rect x="670" y="50" width="160" height="72" rx="6" fill="#0f172a"/>
+      <rect x="670" y="50" width="160" height="72" rx="6" fill="rgba(30,41,59,.5)" stroke="#94a3b8" stroke-width="1.5"/>
+      <text x="750" y="80" fill="#e2e8f0" font-size="12" text-anchor="middle" font-weight="700">调试 SWD</text>
+      <text x="750" y="96" fill="#cbd5e1" font-size="9" text-anchor="middle">JTAG / SWD</text>
+      <text x="750" y="110" fill="#94a3b8" font-size="7" text-anchor="middle">看寄存器/断点/单步</text>
+
+      <!-- ============ 总线（消息总线，放中间间隙） ============ -->
+      <rect x="40" y="200" width="920" height="44" rx="6" fill="#0f172a"/>
+      <rect x="40" y="200" width="920" height="44" rx="6" fill="rgba(251,146,60,.3)" stroke="#fb923c" stroke-width="1.5"/>
+      <text x="500" y="224" fill="#e2e8f0" font-size="11" text-anchor="middle" font-weight="700">AHB / APB 总线（内存映射：CPU 靠地址找到一切）</text>
+
+      <!-- ============ 存储器 ============ -->
+      <rect x="40"  y="300" width="170" height="110" rx="6" fill="#0f172a"/>
+      <rect x="40"  y="300" width="170" height="110" rx="6" fill="rgba(76,29,149,.42)" stroke="#a78bfa" stroke-width="1.5"/>
+      <text x="125" y="340" fill="#e2e8f0" font-size="12" text-anchor="middle" font-weight="700">Flash</text>
+      <text x="125" y="356" fill="#c4b5fd" font-size="9" text-anchor="middle">存程序 · 非易失</text>
+      <text x="125" y="372" fill="#94a3b8" font-size="7" text-anchor="middle">断电还在 · 存代码</text>
+      <rect x="230" y="300" width="170" height="110" rx="6" fill="#0f172a"/>
+      <rect x="230" y="300" width="170" height="110" rx="6" fill="rgba(76,29,149,.42)" stroke="#a78bfa" stroke-width="1.5"/>
+      <text x="315" y="340" fill="#e2e8f0" font-size="12" text-anchor="middle" font-weight="700">SRAM</text>
+      <text x="315" y="356" fill="#c4b5fd" font-size="9" text-anchor="middle">存数据 · 易失</text>
+      <text x="315" y="372" fill="#94a3b8" font-size="7" text-anchor="middle">断电即丢 · 存变量</text>
+
+      <!-- ============ 外设区（边界） ============ -->
+      <rect x="470" y="288" width="520" height="170" rx="12" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="8,4"/>
+      <text x="485" y="306" fill="#22d3ee" font-size="10">外设（实现功能）</text>
+      <!-- GPIO -->
+      <rect x="485" y="320" width="150" height="56" rx="6" fill="#0f172a"/>
+      <rect x="485" y="320" width="150" height="56" rx="6" fill="rgba(8,51,68,.42)" stroke="#22d3ee" stroke-width="1.5"/>
+      <text x="560" y="342" fill="#e2e8f0" font-size="11" text-anchor="middle" font-weight="700">GPIO</text>
+      <text x="560" y="358" fill="#67e8f9" font-size="9" text-anchor="middle">点灯 · 读引脚</text>
+      <!-- 定时器 -->
+      <rect x="655" y="320" width="150" height="56" rx="6" fill="#0f172a"/>
+      <rect x="655" y="320" width="150" height="56" rx="6" fill="rgba(8,51,68,.42)" stroke="#22d3ee" stroke-width="1.5"/>
+      <text x="730" y="342" fill="#e2e8f0" font-size="11" text-anchor="middle" font-weight="700">定时器</text>
+      <text x="730" y="358" fill="#67e8f9" font-size="9" text-anchor="middle">PWM · 计数</text>
+      <!-- UART -->
+      <rect x="825" y="320" width="150" height="56" rx="6" fill="#0f172a"/>
+      <rect x="825" y="320" width="150" height="56" rx="6" fill="rgba(8,51,68,.42)" stroke="#22d3ee" stroke-width="1.5"/>
+      <text x="900" y="342" fill="#e2e8f0" font-size="11" text-anchor="middle" font-weight="700">UART</text>
+      <text x="900" y="358" fill="#67e8f9" font-size="9" text-anchor="middle">串口通信</text>
+      <!-- ADC -->
+      <rect x="485" y="390" width="150" height="52" rx="6" fill="#0f172a"/>
+      <rect x="485" y="390" width="150" height="52" rx="6" fill="rgba(8,51,68,.42)" stroke="#22d3ee" stroke-width="1.5"/>
+      <text x="560" y="412" fill="#e2e8f0" font-size="11" text-anchor="middle" font-weight="700">ADC</text>
+      <text x="560" y="428" fill="#67e8f9" font-size="9" text-anchor="middle">模拟→数字采样</text>
+      <!-- I2C/SPI -->
+      <rect x="655" y="390" width="320" height="52" rx="6" fill="#0f172a"/>
+      <rect x="655" y="390" width="320" height="52" rx="6" fill="rgba(8,51,68,.42)" stroke="#22d3ee" stroke-width="1.5"/>
+      <text x="815" y="412" fill="#e2e8f0" font-size="11" text-anchor="middle" font-weight="700">I2C / SPI</text>
+      <text x="815" y="428" fill="#67e8f9" font-size="9" text-anchor="middle">接传感器 / 存储芯片</text>
+    </svg>
+  </div>
+
+  <div class="legend">
+    <span><span class="swatch" style="background:rgba(6,78,59,.42)"></span>CPU（调度）</span>
+    <span><span class="swatch" style="background:rgba(120,53,15,.3)"></span>时钟/电源</span>
+    <span><span class="swatch" style="background:rgba(136,19,55,.42)"></span>中断</span>
+    <span><span class="swatch" style="background:rgba(30,41,59,.5)"></span>调试</span>
+    <span><span class="swatch" style="background:rgba(76,29,149,.42)"></span>存储器</span>
+    <span><span class="swatch" style="background:rgba(251,146,60,.3)"></span>总线</span>
+    <span><span class="swatch" style="background:rgba(8,51,68,.42)"></span>外设</span>
+  </div>
+
+  <div class="cards">
+    <div class="card2"><h3><span class="d" style="background:#34d399"></span>三者关系</h3><ul>
+      <li>• C 语言：设计功能、表达"怎么实现"</li>
+      <li>• CPU：取指/译码/执行，调度程序</li>
+      <li>• MCU：CPU+存储+外设，实现功能</li>
+    </ul></div>
+    <div class="card2"><h3><span class="d" style="background:#a78bfa"></span>存储分工（易失/非易失）</h3><ul>
+      <li>• Flash：存程序，断电还在（非易失）</li>
+      <li>• SRAM：存变量，断电即丢（易失）</li>
+      <li>• 这就是"程序跑起来"的底料</li>
+    </ul></div>
+    <div class="card2"><h3><span class="d" style="background:#22d3ee"></span>为什么叫"微控制器"</h3><ul>
+      <li>• CPU + 存储 + 外设 + 时钟 + 总线</li>
+      <li>• 全集成在一颗芯片里（单片机）</li>
+      <li>• 一个 MCU 就能扛一个完整控制任务</li>
+    </ul></div>
+  </div>
+
+  <div class="footer">Architecture diagram · dark SVG · 由 Hermes 富展示技能生成 · MCU 经典架构（Cortex-M）</div>
+</body>
+</html>

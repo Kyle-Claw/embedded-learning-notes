@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FOC 核心：Clarke/Park 坐标变换（旋转坐标系让交流变直流）</title>
+<style>
+  body { margin:0; background:#141414; color:#e8e8e8; font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif; display:flex; flex-direction:column; align-items:center; padding:22px 16px; }
+  h1 { font-size:22px; font-weight:700; margin:0 0 6px; color:#fff; letter-spacing:1px; }
+  .sub { font-size:14px; color:#aaa; margin-bottom:18px; text-align:center; max-width:820px; }
+  canvas { background:#1c1c1c; border-radius:12px; box-shadow:0 6px 28px rgba(0,0,0,.55); }
+  .legend { display:flex; gap:26px; margin-top:16px; font-size:13px; flex-wrap:wrap; justify-content:center; color:#d0d0d0; }
+  .legend span { display:flex; align-items:center; gap:7px; }
+  .dot { width:12px; height:12px; border-radius:3px; display:inline-block; }
+  .explain { max-width:820px; margin-top:20px; font-size:14px; line-height:1.85; color:#c8c8c8; background:#1a1a1a; border-left:3px solid #ffb454; padding:14px 18px; border-radius:6px; }
+  .explain b { color:#ffb454; }
+</style>
+</head>
+<body>
+<h1>FOC 核心：为什么要把三相交流"转"成 dq 直流？</h1>
+<div class="sub">Clarke/Park 坐标变换 —— 左图是"站在地面看"（静止 αβ 坐标系），右图是"跳到转子上看"（旋转 dq 坐标系）。同一个矢量，换个视角，旋转就变成了静止。</div>
+<canvas id="c" width="920" height="430"></canvas>
+<div class="legend">
+  <span><span class="dot" style="background:#ff9800"></span>电流合成矢量 i（旋转）</span>
+  <span><span class="dot" style="background:#83c167"></span>d 轴（转子磁场方向）</span>
+  <span><span class="dot" style="background:#58c4dd"></span>q 轴（垂直于 d 轴）</span>
+  <span><span class="dot" style="background:#777"></span>α / β 静止轴</span>
+</div>
+<div class="explain">
+  <b>看左图</b>：三相电流合成一个旋转的矢量（橙色箭头），在静止的 αβ 坐标系里一圈圈转——这是<b>交流</b>。<br>
+  <b>看右图</b>：如果"跳上转子"，让 dq 坐标系跟着矢量一起转，这个矢量就<b>静止不动</b>了，d、q 两个分量变成<b>恒定值（直流）</b>。<br>
+  <b>为什么重要</b>：PI 控制器对<b>直流</b>能做到零稳态误差，对<b>交流</b>却会有幅值衰减和相位滞后。把交流"变"成直流，就能像控制直流电机一样精准控制交流电机——这就是 FOC 的全部核心。
+</div>
+<script>
+(function(){
+  var c = document.getElementById('c');
+  var ctx = c.getContext('2d');
+  var W = c.width, H = c.height;
+  var cx1 = 240, cy = 165;   // 左面板中心
+  var cx2 = 680, cy = 165;   // 右面板中心
+  var R = 122;               // 矢量长度(px)
+  var phi = 0.55;            // 电流矢量超前 d 轴的固定角(负载角)
+  var omega = 0.85;          // 角速度 rad/s
+  var t = 0.7;               // 初始角度错开，避免 d/q 轴与 α/β 轴首帧重合
+  var last = performance.now();
+
+  function arrow(x, y, ang, len, color, w){
+    ctx.strokeStyle = color; ctx.lineWidth = w; ctx.lineCap = 'round';
+    var hx = x + len*Math.cos(ang), hy = y + len*Math.sin(ang);
+    ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(hx,hy); ctx.stroke();
+    var ah = 10;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(hx,hy);
+    ctx.lineTo(hx - ah*Math.cos(ang-0.42), hy - ah*Math.sin(ang-0.42));
+    ctx.lineTo(hx - ah*Math.cos(ang+0.42), hy - ah*Math.sin(ang+0.42));
+    ctx.closePath(); ctx.fill();
+  }
+
+  function axis(x, y, ang, len, color, w){
+    ctx.strokeStyle = color; ctx.lineWidth = w||1.4;
+    ctx.beginPath();
+    ctx.moveTo(x - len*Math.cos(ang), y - len*Math.sin(ang));
+    ctx.lineTo(x + len*Math.cos(ang), y + len*Math.sin(ang));
+    ctx.stroke();
+  }
+
+  function label(x, y, text, color, size){
+    ctx.fillStyle = color;
+    ctx.font = (size||13) + "px 'Microsoft YaHei', sans-serif";
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(text, x, y);
+  }
+
+  function panelTitle(x, y, text){
+    label(x, y, text, '#ffffff', 15);
+  }
+
+  function draw(now){
+    var dt = (now - last)/1000; last = now;
+    t += dt * omega;
+    var theta = t;                 // 转子/d 轴角度
+    var vecA = theta - phi;        // 电流矢量角（超前 d 轴 phi）
+
+    ctx.clearRect(0, 0, W, H);
+
+    /* ===== 左：静止 αβ 坐标系 ===== */
+    panelTitle(cx1, 30, '静止 αβ 坐标系（站在地面看）');
+    ctx.strokeStyle = '#303030'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(cx1, cy, R, 0, 2*Math.PI); ctx.stroke();
+    axis(cx1, cy, 0, R+20, '#777');
+    axis(cx1, cy, -Math.PI/2, R+20, '#777');
+    label(cx1 + R + 34, cy, 'α', '#999', 14);
+    label(cx1, cy - R - 34, 'β', '#999', 14);
+    // 旋转的 d/q 轴
+    axis(cx1, cy, theta, R+12, '#83c167', 2.2);
+    axis(cx1, cy, theta - Math.PI/2, R+12, '#58c4dd', 2.2);
+    label(cx1 + (R+24)*Math.cos(theta), cy + (R+24)*Math.sin(theta), 'd', '#83c167', 15);
+    label(cx1 + (R+24)*Math.cos(theta - Math.PI/2), cy + (R+24)*Math.sin(theta - Math.PI/2), 'q', '#58c4dd', 15);
+    // 旋转的电流矢量
+    arrow(cx1, cy, vecA, R, '#ff9800', 3);
+    label(cx1 + (R+24)*Math.cos(vecA), cy + (R+24)*Math.sin(vecA), 'i', '#ff9800', 15);
+
+    /* ===== 右：旋转 dq 坐标系 ===== */
+    panelTitle(cx2, 30, '旋转 dq 坐标系（站在转子上看）');
+    axis(cx2, cy, 0, R+20, '#83c167', 2.2);
+    axis(cx2, cy, -Math.PI/2, R+20, '#58c4dd', 2.2);
+    label(cx2 + R + 34, cy, 'd', '#83c167', 14);
+    label(cx2, cy - R - 34, 'q', '#58c4dd', 14);
+    // 固定的矢量（在旋转系里静止）
+    arrow(cx2, cy, -phi, R, '#ff9800', 3);
+    label(cx2 + (R+24)*Math.cos(-phi), cy + (R+24)*Math.sin(-phi), 'i', '#ff9800', 15);
+    // d/q 投影（恒定）
+    var dl = R*Math.cos(phi), ql = R*Math.sin(phi);
+    ctx.setLineDash([4,4]);
+    ctx.strokeStyle = '#83c167'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx2, cy); ctx.lineTo(cx2 + dl, cy); ctx.stroke();
+    ctx.strokeStyle = '#58c4dd';
+    ctx.beginPath(); ctx.moveTo(cx2 + dl, cy); ctx.lineTo(cx2 + dl, cy - ql); ctx.stroke();
+    ctx.setLineDash([]);
+    label(cx2 + dl/2, cy + 20, 'i_d（恒定）', '#83c167', 13);
+    label(cx2 + dl + 16, cy - ql/2, 'i_q（恒定）', '#58c4dd', 13);
+
+    /* ===== 底部：电流波形对比 ===== */
+    var sx = 90, sy = 352, sw = 740, sh = 60, mid = sy + sh/2, amp = sh*0.36;
+    ctx.strokeStyle = '#303030'; ctx.lineWidth = 1; ctx.strokeRect(sx, sy, sw, sh);
+    // i_a 正弦（交流）
+    ctx.strokeStyle = '#888'; ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for(var x=0; x<sw; x++){
+      var tt = (x/sw) * 4*Math.PI;
+      var yy = mid - amp*Math.cos(tt);
+      if(x===0) ctx.moveTo(sx+x, yy); else ctx.lineTo(sx+x, yy);
+    }
+    ctx.stroke();
+    // i_d / i_q 平线（直流）
+    ctx.strokeStyle = '#83c167'; ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.moveTo(sx, mid - amp*Math.cos(phi)); ctx.lineTo(sx+sw, mid - amp*Math.cos(phi)); ctx.stroke();
+    ctx.strokeStyle = '#58c4dd'; ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.moveTo(sx, mid - amp*Math.sin(phi)); ctx.lineTo(sx+sw, mid - amp*Math.sin(phi)); ctx.stroke();
+    label(sx + sw/2, sy + sh - 13, '时间 →   灰=i_a(交流)   绿=i_d(直流·恒定)   蓝=i_q(直流·恒定)', '#bbb', 12);
+
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

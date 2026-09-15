@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCU 架构 · C语言/MCU/CPU 三者关系（交互演示）</title>
+<style>
+  body { margin:0; background:#141414; color:#e8e8e8; font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif; display:flex; flex-direction:column; align-items:center; padding:20px 14px; }
+  h1 { font-size:21px; font-weight:700; color:#fff; margin:0 0 6px; letter-spacing:1px; }
+  .sub { font-size:13.5px; color:#aaa; margin-bottom:14px; text-align:center; max-width:960px; line-height:1.6; }
+  canvas { background:#1b1b1b; border-radius:12px; box-shadow:0 6px 28px rgba(0,0,0,.55); }
+  .controls { display:flex; gap:12px; margin-top:16px; }
+  .controls button { background:#2a2a2a; color:#e8e8e8; border:1px solid #555; border-radius:8px; padding:10px 22px; font-size:15px; cursor:pointer; font-family:inherit; }
+  .controls button:hover { background:#3a3a3a; border-color:#888; }
+  .controls button.primary { background:#2563eb; border-color:#2563eb; color:#fff; }
+  .controls button.primary:hover { background:#1d4ed8; }
+  .legend { display:flex; gap:20px; margin-top:14px; font-size:12.5px; color:#ccc; flex-wrap:wrap; justify-content:center; }
+  .legend span { display:flex; align-items:center; gap:6px; }
+  .dot { width:11px; height:11px; border-radius:3px; display:inline-block; }
+</style>
+</head>
+<body>
+  <h1>MCU 架构 · C语言 / MCU / CPU 三者关系</h1>
+  <div class="sub">点「下一步」一步步看：<b>C 语言</b>（人写）→ <b>编译</b>（变成机器指令）→ <b>CPU</b>（取指/译码/执行，调度程序）→ <b>外设</b>（写寄存器）→ <b>MCU 实现功能</b>（灯亮）。C 表达意图，CPU 调度，MCU 实现。</div>
+  <canvas id="c" width="1000" height="540"></canvas>
+  <div class="controls">
+    <button class="primary" id="next">下一步 ▶</button>
+    <button id="prev">上一步 ◀</button>
+    <button id="auto">自动播放 ▶▶</button>
+    <button id="stop">暂停 ⏸</button>
+  </div>
+  <div class="legend">
+    <span><span class="dot" style="background:#4f8cff"></span>C 语言（设计/表达）</span>
+    <span><span class="dot" style="background:#ffb454"></span>编译（变成指令）</span>
+    <span><span class="dot" style="background:#83c167"></span>CPU（取指/译码/执行）</span>
+    <span><span class="dot" style="background:#c792ea"></span>外设（GPIO/驱动）</span>
+    <span><span class="dot" style="background:#58c4dd"></span>MCU 功能（灯亮）</span>
+  </div>
+<script>
+(function(){
+  var c = document.getElementById('c');
+  var ctx = c.getContext('2d');
+  var W = c.width, H = c.height;
+  var step = 0, autoOn = false;
+  var steps = [
+    { t:'① C 语言 —— 设计功能、表达"怎么实现"',
+      d:'程序员写 C 源码，例如：<b>GPIO_WritePin(LED, HIGH);</b> —— 用人类语言表达意图"点亮 LED"。',
+      c:'#4f8cff' },
+    { t:'② 编译 —— 翻译成 CPU 认识的机器指令',
+      d:'编译器把一行 C 翻译成几条汇编/机器指令，例如 <b>str r0, [r1]</b>（把值写进寄存器）。',
+      c:'#ffb454' },
+    { t:'③ CPU —— 取指/译码/执行，调度程序',
+      d:'CPU 逐条<b>取指→译码→执行</b>，决定"先干什么、后干什么"——它就是<b>程序调度</b>的核心。',
+      c:'#83c167' },
+    { t:'④ 驱动外设 —— 写寄存器，点亮引脚',
+      d:'指令写到 <b>GPIO 寄存器(ODR)</b>，把对应引脚那一位置高 → 引脚输出<b>高电平</b>。',
+      c:'#c792ea' },
+    { t:'⑤ MCU 实现功能 —— 整机协同，灯亮了',
+      d:'电源 + 时钟 + CPU + 外设 一起协作 → <b>LED 亮</b>。C 表达的意图，最终被"实现"出来。',
+      c:'#58c4dd' }
+  ];
+
+  // MCU 架构图节点（用于各阶段点亮对应部件）
+  var arch = [
+    { x:40,  y:74, w:150, h:60, label:'CPU 核',          sub:'取指/译码/执行', c:'#83c167' },
+    { x:230, y:74, w:150, h:60, label:'Flash(程序)',       sub:'非易失',        c:'#58c4dd' },
+    { x:420, y:74, w:150, h:60, label:'SRAM(数据)',        sub:'易失',          c:'#58c4dd' },
+    { x:610, y:74, w:150, h:60, label:'时钟 RCC',         sub:'打节拍',        c:'#ffb454' },
+    { x:800, y:74, w:160, h:60, label:'NVIC 中断',         sub:'响应事件',      c:'#c792ea' }
+  ];
+  var periph = [
+    { x:40,  y:180, w:160, h:60, label:'GPIO',   sub:'引脚',   c:'#c792ea' },
+    { x:240, y:180, w:140, h:60, label:'定时器', sub:'定时',   c:'#c792ea' },
+    { x:420, y:180, w:140, h:60, label:'UART',   sub:'串口',   c:'#c792ea' },
+    { x:600, y:180, w:140, h:60, label:'ADC',    sub:'采样',   c:'#c792ea' },
+    { x:780, y:180, w:180, h:60, label:'I2C/SPI', sub:'通信',  c:'#c792ea' }
+  ];
+  // 哪个部件在哪个阶段点亮
+  function activeNodes(s){
+    if(s===0) return [];
+    if(s===1) return ['时钟 RCC'];           // 编译前要有时钟？其实时钟是运行前提，这里示意
+    if(s===2) return ['CPU 核'];
+    if(s===3) return ['GPIO'];
+    return ['CPU 核','Flash(程序)','SRAM(数据)','时钟 RCC','GPIO'];
+  }
+
+  function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+
+  function drawBox(x,y,w,h,color,label,sub,active){
+    ctx.fillStyle = active ? '#2b2b2b' : '#1f1f1f';
+    ctx.strokeStyle = active ? color : '#444';
+    ctx.lineWidth = active ? 3 : 1.4;
+    roundRect(x,y,w,h,8); ctx.fill(); ctx.stroke();
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillStyle = active ? color : '#ddd';
+    ctx.font = 'bold 14px "Microsoft YaHei",sans-serif';
+    ctx.fillText(label, x+w/2, y+h/2-11);
+    ctx.fillStyle = active ? '#bbb' : '#888';
+    ctx.font = '10px "Microsoft YaHei",sans-serif';
+    ctx.fillText(sub, x+w/2, y+h/2+11);
+  }
+
+  function drawStageChain(){
+    // 顶部阶段链（5 节点），当前阶段高亮
+    var y = 24, cxs = [];
+    var total = steps.length;
+    var gap = W / (total+1);
+    for(var i=0;i<total;i++){
+      var x = gap*(i+1);
+      cxs.push(x);
+      var active = (i===step);
+      // 圆点
+      ctx.fillStyle = active ? steps[i].c : '#333';
+      ctx.beginPath(); ctx.arc(x, y, 16, 0, 2*Math.PI); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = active ? steps[i].c : '#555'; ctx.lineWidth=active?3:1.4; ctx.stroke();
+      ctx.fillStyle = active ? '#141414' : '#bbb'; ctx.font='bold 12px "Microsoft YaHei",sans-serif'; ctx.textAlign='center';
+      ctx.fillText(i+1, x, y);
+      ctx.fillStyle = active ? steps[i].c : '#888'; ctx.font='bold 12px "Microsoft YaHei",sans-serif';
+      ctx.fillText(['C语言','编译','CPU','外设','MCU'][i], x, y+30);
+    }
+    // 连接线
+    ctx.strokeStyle='#555'; ctx.lineWidth=1.4;
+    for(var i=0;i<total-1;i++){ ctx.beginPath(); ctx.moveTo(cxs[i]+22, y); ctx.lineTo(cxs[i+1]-22, y); ctx.stroke(); }
+    // 当前阶段标题
+    ctx.fillStyle = steps[step].c; ctx.font='bold 16px "Microsoft YaHei",sans-serif'; ctx.textAlign='center';
+    ctx.fillText(steps[step].t, W/2, y+62);
+  }
+
+  function drawMcu(){
+    var active = activeNodes(step);
+    ctx.fillStyle='#777'; ctx.font='bold 12px "Microsoft YaHei",sans-serif'; ctx.textAlign='left';
+    ctx.fillText('MCU 架构（经典 Cortex-M）：', 40, 50);
+    for(var i=0;i<arch.length;i++){ var a=arch[i]; drawBox(a.x,a.y,a.w,a.h,a.c,a.label,a.sub, active.includes(a.label)); }
+    ctx.fillStyle='#777'; ctx.font='bold 12px "Microsoft YaHei",sans-serif';
+    ctx.fillText('外设与总线：', 40, 166);
+    for(var i=0;i<periph.length;i++){ var p=periph[i]; drawBox(p.x,p.y,p.w,p.h,p.c,p.label,p.sub, active.includes(p.label)); }
+    // 总线示意（AHB/APB）
+    ctx.strokeStyle='#555'; ctx.lineWidth=2; ctx.setLineDash([5,4]);
+    ctx.beginPath(); ctx.moveTo(40,165); ctx.lineTo(960,165); ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  function drawDetail(){
+    // 当前阶段详情 + 关键图示
+    var y = 268;
+    ctx.fillStyle = steps[step].c; ctx.font='bold 14px "Microsoft YaHei",sans-serif'; ctx.textAlign='left';
+    ctx.fillText('当前阶段：' + steps[step].t, 40, y+6);
+    // 说明文字（去掉 html 标签简单换行）
+    var raw = steps[step].d.replace(/<[^>]+>/g,'');
+    ctx.fillStyle='#ddd'; ctx.font='14px "Microsoft YaHei",sans-serif';
+    wrapText(raw, 40, y+30, 920, 22);
+
+    // 底部图示：C代码 → ... → LED
+    drawBottom(step);
+  }
+
+  function wrapText(text,x,y,maxW,lh){
+    var chars=text.split(''); var line='',lines=[];
+    for(var i=0;i<chars.length;i++){ var t=line+chars[i]; if(ctx.measureText(t).width>maxW && line.length>0){lines.push(line);line=chars[i];} else line=t; }
+    if(line)lines.push(line);
+    for(var j=0;j<lines.length;j++) ctx.fillText(lines[j], x, y+j*lh);
+  }
+
+  function drawBottom(s){
+    var y = 385, x0 = 80, x1 = 470, x2 = 860;
+    // 左：C 代码块
+    ctx.fillStyle='#1a1a1a'; ctx.strokeStyle='#4f8cff'; ctx.lineWidth=1.4;
+    roundRect(60,y-16,380,120,8); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#4f8cff'; ctx.font='bold 12px "Microsoft YaHei",sans-serif'; ctx.textAlign='left';
+    ctx.fillText('C 源码', 74, y+2);
+    ctx.fillStyle='#e8e8e8'; ctx.font='13px "Consolas","Microsoft YaHei",monospace';
+    ctx.fillText('GPIO_WritePin(', 74, y+26);
+    ctx.fillText('  LED, HIGH);', 90, y+48);
+    ctx.fillStyle='#888'; ctx.font='11px "Microsoft YaHei",sans-serif';
+    ctx.fillText('// 我要点亮 LED', 74, y+70);
+
+    // 中：指令
+    var comp = ['','str r0, [r1]','取指→译码→执行'] [Math.min(s,2)];
+    ctx.fillStyle='#1a1a1a'; ctx.strokeStyle='#ffb454'; ctx.lineWidth=1.4;
+    roundRect(470,y-16,300,120,8); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#ffb454'; ctx.font='bold 12px "Microsoft YaHei",sans-serif';
+    ctx.fillText(s<1?'（编译前，这里是 C）': (s===1?'编译产物 · 机器指令':'CPU 的动作'), 484, y+2);
+    ctx.fillStyle='#e8e8e8'; ctx.font='13px "Consolas","Microsoft YaHei",monospace';
+    ctx.fillText(s===0?'...': (s===1? 'str r0, [r1]  ;写寄存器' : '取指→译码→执行'), 484, y+26);
+
+    // 右：LED
+    ctx.fillStyle='#1a1a1a'; ctx.strokeStyle='#58c4dd'; ctx.lineWidth=1.4;
+    roundRect(790,y-16,150,120,8); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#58c4dd'; ctx.font='bold 12px "Microsoft YaHei",sans-serif'; ctx.textAlign='center';
+    ctx.fillText('结果', 865, y+2);
+    // LED
+    var lit = (s>=3);
+    ctx.fillStyle = lit ? '#ffd54d' : '#3a3a3a';
+    ctx.strokeStyle = lit ? '#ed9710' : '#666'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(865, y+56, 28, 0, 2*Math.PI); ctx.fill(); ctx.stroke();
+    if(lit){ ctx.shadowColor='#ffb300'; ctx.shadowBlur=24; ctx.beginPath(); ctx.arc(865,y+56,28,0,2*Math.PI); ctx.fill(); ctx.shadowBlur=0; }
+    ctx.fillStyle = lit ? '#6b4d00' : '#888'; ctx.textAlign='center';
+    ctx.fillText(lit?'亮！':'灭', 865, y+60);
+    ctx.fillStyle='#888'; ctx.font='11px "Microsoft YaHei",sans-serif'; ctx.fillText('LED', 865, y+100);
+
+    // 箭头连接
+    ctx.strokeStyle='#888'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(442, y+44); ctx.lineTo(468, y+44); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(772, y+44); ctx.lineTo(790, y+44); ctx.stroke();
+    ctx.fillStyle='#888'; ctx.font='20px "Microsoft YaHei",sans-serif'; ctx.textAlign='center';
+    ctx.fillText('→', 455, y+50); ctx.fillText('→', 780, y+50);
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    drawMcu();
+    drawStageChain();
+    drawDetail();
+  }
+  draw();
+
+  // 交互控制
+  function go(d){ step = (step + d + steps.length) % steps.length; draw(); }
+  document.getElementById('next').onclick = function(){ stopAuto(); go(1); };
+  document.getElementById('prev').onclick = function(){ stopAuto(); go(-1); };
+  var timer=null;
+  function playback(){ step=(step+1)%steps.length; draw(); }
+  document.getElementById('auto').onclick = function(){ stopAuto(); autoOn=true; timer=setInterval(playback,1400); };
+  document.getElementById('stop').onclick=function(){ stopAuto(); };
+  function stopAuto(){ if(timer){clearInterval(timer);timer=null;} autoOn=false; }
+})();
+</script>
+</body>
+</html>
